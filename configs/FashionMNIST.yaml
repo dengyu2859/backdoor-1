@@ -4,10 +4,9 @@ dataset: FashionMNIST
 num_classes: 10
 model: CNN_Fashion_MNIST
 pre_model: 0
-epochs: 200
-back_target: [5]
-back_results: 7
-malicious: 0.4
+epochs: 100
+back_target: 5
+malicious: 0.2
 attack_epoch: 3
 defense: Rflbat
 # vae, fld, Rflbat, flame, Rflbat, Mab_rfl, DPA, Fltrust, Dnc, Deepsight, RLR

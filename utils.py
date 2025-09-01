@@ -93,37 +93,6 @@ def Backdoor_process(test_dataset, args):
     Inject_trigger(test_dataset, label_indices, args)
 
 
-# 恶意客户端选择，随机方案
-# def Choice_mali_clients(dict_users, args):
-#     client_ids = list(dict_users.keys())
-#     num_malicious = int(len(client_ids) * args.malicious)
-#     malicious_id = random.sample(client_ids, num_malicious)
-#
-#     return malicious_id
-
-
-# 恶意客户端选择, 保证被选中的恶意客户端都有指定的后门标签数据
-# def Choice_mali_clients(dict_users, dataset, args):
-#     if args.dataset == 'FEMNIST':
-#         user_with_target = [
-#             user for user, sample_indices in dict_users.items()
-#             if any(dataset.label[sample] in args.back_target for sample in sample_indices)
-#         ]
-#
-#         num_malicious_clients = int(args.clients * args.malicious)
-#
-#         return user_with_target if len(user_with_target) <= num_malicious_clients else random.sample(user_with_target,
-#                                                                                                      num_malicious_clients)
-#     else:
-#         user_with_target = [
-#             user for user, sample_indices in dict_users.items()
-#             if any(dataset.targets[sample] in args.back_target for sample in sample_indices)
-#         ]
-#
-#         num_malicious_clients = int(args.clients * args.malicious)
-#
-#         return user_with_target if len(user_with_target) <= num_malicious_clients else random.sample(user_with_target,
-#                                                                                                      num_malicious_clients)
 
 def Choice_mali_clients(dict_users, args):
     num_malicious_clients = int(args.clients * args.malicious)
@@ -192,7 +161,7 @@ def print_exp_details(args):
     print(f'    Num_classes: {args.num_classes}')
     print(f'    Number of clients: {args.clients}')
     print(f'    Rounds of training: {args.epochs}')
-    print(f'    Attack_type: {args.attack_type}')
+    print(f'    Attack: {args.attack}')
     print(f'    malicious clients: {args.malicious}')
     print(f'    pre_model: {args.pre_model}')
     print(f'    Degree of no-iid: {args.a}')

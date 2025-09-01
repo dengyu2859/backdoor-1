@@ -2,10 +2,9 @@
 gpu: 0
 dataset: CIFAR100
 num_classes: 100
-model: resnet20
+model: resnet18
 pre_model: 0
 back_target: 3
-back_results: 5
 malicious: 0.2
 epochs: 200
 attack_epoch: 3
@@ -17,6 +16,6 @@ a: 0.5
 clients: 100
 local_bs: 10
 bs: 128
-lr: 0.001
+lr: 0.1
 momentum: 0.5
 local_ep: 1

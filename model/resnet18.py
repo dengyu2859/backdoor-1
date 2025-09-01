@@ -122,7 +122,7 @@ class Bottleneck(nn.Module):
 
 class ResNet(Model):
 
-    def __init__(self, block, layers, num_classes=10,
+    def __init__(self, args, block, layers, num_classes=10,
                  zero_init_residual=False,
                  groups=1, width_per_group=64,
                  replace_stride_with_dilation=None,
@@ -158,7 +158,7 @@ class ResNet(Model):
         self.layer4 = self._make_layer(block, 512, layers[3], stride=2,
                                        dilate=replace_stride_with_dilation[2])
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
-        self.fc = nn.Linear(512 * block.expansion, num_classes)
+        self.fc = nn.Linear(512 * block.expansion, args.num_classes)
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
@@ -238,8 +238,8 @@ class ResNet(Model):
             return x
 
 
-def _resnet(arch, block, layers, pretrained, progress, **kwargs):
-    model = ResNet(block, layers, **kwargs)
+def _resnet(arch, args, block, layers, pretrained, progress, **kwargs):
+    model = ResNet(args, block, layers, **kwargs)
     if pretrained:
         state_dict = load_state_dict_from_url(model_urls[arch],
                                               progress=progress)
@@ -247,7 +247,7 @@ def _resnet(arch, block, layers, pretrained, progress, **kwargs):
     return model
 
 
-def resnet18(pretrained=False, progress=True, **kwargs):
+def resnet18(args, pretrained=False, progress=True, **kwargs):
     r"""ResNet-18 model from
     `"Deep Residual Learning for Image Recognition"
     <https://arxiv.org/pdf/1512.03385.pdf>`_
@@ -256,7 +256,7 @@ def resnet18(pretrained=False, progress=True, **kwargs):
         pretrained (bool): If True, returns a model pre-trained on ImageNet
         progress (bool): If True, displays a progress bar of the download to stderr
     """
-    return _resnet('resnet18', BasicBlock, [2, 2, 2, 2], pretrained, progress,
+    return _resnet('resnet18', args, BasicBlock, [2, 2, 2, 2], pretrained, progress,
                    **kwargs)
 
 

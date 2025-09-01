@@ -2,9 +2,14 @@ import os
 import copy
 import torch
 import utils
+import random
 from torch.utils.data import DataLoader
-from torchvision.transforms import transforms
+import matplotlib.pyplot as plt
+import torchvision.transforms as transforms
+from torch.utils.data import Subset
 
+
+# 恶意客户端
 class Malicious_client():
     def __init__(self, _id, args, loss_func, model_path, train_dataset=None, data_idxs=None):
         self.pattern_tensor = torch.tensor([
@@ -16,7 +21,7 @@ class Malicious_client():
         self.x_top = 3
         self.y_top = 23
         self.mask_value = -10
-        self.poisoning_proportion = 0.2
+        self.poisoning_proportion = 0.5
         self.id = _id
         self.args = args
         self.model_path = model_path
@@ -28,8 +33,6 @@ class Malicious_client():
         self.pattern = None
         self.train_loader = DataLoader(self.normal_dataset, batch_size=self.args.local_bs, shuffle=True)
         self.input_shape = self.normal_dataset[0][0].shape
-        self.normalize= transforms.Normalize(mean=[0.4914, 0.4822, 0.4465],
-                                         std=[0.2023, 0.1994, 0.2010])
         self.Make_pattern()
 
 
@@ -41,13 +44,20 @@ class Malicious_client():
         for _ in range(self.args.local_ep):
             for i, (images, labels) in enumerate(self.train_loader):
                 optimizer.zero_grad()
+
                 inputs = images.to(device=self.args.device, non_blocking=True)
                 labels = labels.to(device=self.args.device, non_blocking=True)
+
                 poisoning_index = self.Implant_trigger(inputs, labels)
+
                 outputs = self.local_model(inputs)
-                loss = self.loss_func(outputs, labels)     # 计算后门损失
-                loss.backward()                       # 反向传播
-                optimizer.step()                      # 更新模型参数
+
+                # 计算损失
+                loss = self.loss_func(outputs, labels)
+
+                # 反向传播
+                loss.backward()
+                optimizer.step()
 
         with torch.no_grad():
             path = os.path.join(self.model_path, f"client_{self.id}_epoch_{epoch}.pt")
@@ -72,6 +82,7 @@ class Malicious_client():
 
         return poisoning_index
 
+
     def Make_pattern(self):
         full_image = torch.zeros(self.input_shape)
         full_image.fill_(self.mask_value)
@@ -84,7 +95,7 @@ class Malicious_client():
 
         full_image[:, self.x_top:x_bot, self.y_top:y_bot] = self.pattern_tensor
         self.mask = 1 * (full_image != self.mask_value).to(self.args.device)
-        self.pattern = self.normalize(full_image).to(self.args.device)
+        self.pattern = full_image.to(self.args.device)
 
 
     # 计算模型更新
@@ -105,5 +116,23 @@ class Malicious_client():
                 return True
 
         return False
+
+
+    # 图片可视化
+    def Show_img(self, tensor_img, label=None, mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5)):
+        # 反归一化
+        inv_normalize = transforms.Normalize(
+            mean=[-m / s for m, s in zip(mean, std)],
+            std=[1 / s for s in std]
+        )
+        img = inv_normalize(tensor_img.cpu())
+        img = torch.clamp(img, 0, 1)  # 保证范围在 [0,1]
+
+        # 显示
+        plt.imshow(img.permute(1, 2, 0))  # C,H,W → H,W,C
+        if label is not None:
+            plt.title(f"Label: {label}")
+        plt.axis("off")
+        plt.show()
 
 

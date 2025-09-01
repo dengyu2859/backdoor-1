@@ -7,7 +7,7 @@ from model.resnet18 import resnet18
 def get_model(args):
     model = None
     if args.model == 'resnet18':
-        model = resnet18(pretrained=False, progress=False, num_classes=10).to(args.device)
+        model = resnet18(args, pretrained=False, progress=False).to(args.device)
     if args.model == 'resnet20':
         model = resnet20(args=args).to(args.device)
         if args.dataset == 'CIFAR10':
