@@ -3,19 +3,15 @@ gpu: 1
 dataset: FashionMNIST
 num_classes: 10
 model: CNN_Fashion_MNIST
-pre_model: 0
-epochs: 100
+epochs: 20
 back_target: 5
-malicious: 0.2
-attack_epoch: 3
-defense: Rflbat
-# vae, fld, Rflbat, flame, Rflbat, Mab_rfl, DPA, Fltrust, Dnc, Deepsight, RLR
 attack_type: How_backdoor
-# How_backdoor
-a: 0.5
-clients: 100
+a: 1.0
+attack: 1
+malicious: 0
+clients: 10
 local_bs: 10
 bs: 128
 lr: 0.001
 momentum: 0.5
-local_ep: 1
+local_ep: 5

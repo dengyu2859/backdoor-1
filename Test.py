@@ -48,7 +48,7 @@ def Backdoor_Evaluate(model, datasets, loss_func, args):
     for i, (images, labels) in enumerate(test_loader):
         inputs = images.to(device=args.device, non_blocking=True)
         labels = labels.to(device=args.device, non_blocking=True)
-        index = Implant_trigger(inputs, labels,mask, pattern, args)
+        index = Implant_trigger(inputs, labels, mask, pattern, args)
         outputs = model(inputs)
         loss = loss_func(outputs, labels)
         _, predicted = torch.max(outputs.data, 1)
@@ -68,7 +68,6 @@ def Backdoor_Evaluate(model, datasets, loss_func, args):
     return back_acc, back_loss
 
 
-
 def Implant_trigger(data, label, mask, pattern, args):
     index = []
     for i in range(len(data)):
@@ -86,8 +85,7 @@ def Implant_trigger(data, label, mask, pattern, args):
 
 
 def Make_pattern(x_top, y_top, mask_value, pattern_tensor, input_shape, args):
-    normalize = transforms.Normalize(mean=[0.4914, 0.4822, 0.4465],
-                                     std=[0.2023, 0.1994, 0.2010])
+    normalize = transforms.Normalize(mean=[0.5], std=[0.5])
     full_image = torch.zeros(input_shape)
     full_image.fill_(mask_value)
     x_bot = x_top + pattern_tensor.shape[0]

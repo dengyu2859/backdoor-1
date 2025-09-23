@@ -7,7 +7,10 @@ from model.resnet18 import resnet18
 def get_model(args):
     model = None
     if args.model == 'resnet18':
-        model = resnet18(args, pretrained=False, progress=False).to(args.device)
+        model = resnet18(args=args, pretrained=False, progress=False).to(args.device)
+        if args.pre_model:
+            model.load_state_dict(torch.load("pre_model/cifar10_resnet18.pt"))  # 加载预训练模型参数CIFAR10
+            print("CIFAR10 dataset loads pre-trained model cifar10_resnet18")
     if args.model == 'resnet20':
         model = resnet20(args=args).to(args.device)
         if args.dataset == 'CIFAR10':
@@ -35,7 +38,6 @@ class CNN_Fashion_MNIST(nn.Module):
         self.conv2 = nn.Conv2d(20, 50, 5, 1)
         self.fc1 = nn.Linear(4 * 4 * 50, 500)
         self.fc2 = nn.Linear(500, args.num_classes)
-            # self.fc2 = nn.Linear(28*28, 10)
 
     def forward(self, x):
         x = F.relu(self.conv1(x))

@@ -2,13 +2,14 @@
 gpu: 0
 dataset: CIFAR10
 num_classes: 10
-model: resnet18
-pre_model: 0
+model: resnet20
+pre_model: 1
 back_target: 3
-malicious: 0.1
-epochs: 20
+malicious: 0.2
+epochs: 10
 attack_epoch: 3
-defense: 1
+defense: Flame
+# FedAvg, Agg_alignins, Agg_masa, Freqfed, MAB_RFL, Foolsgold, Deepsight, Flame
 attack: 1
 a: 0.5
 clients: 100

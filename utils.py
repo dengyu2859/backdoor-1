@@ -6,8 +6,9 @@ import os
 from Distribution import NO_iid
 from torch.utils.data import Dataset
 import random
-from collections import OrderedDict
-import shutil
+from torch.utils.data import Subset
+import matplotlib.pyplot as plt
+import numpy as np
 
 
 def Download_data(name, path, args):
@@ -87,69 +88,58 @@ def Inject_trigger(test_dataset, target_indices, args):
             continue
 
 
-# 测试集嵌入后门触发器
-def Backdoor_process(test_dataset, args):
-    label_indices = [i for i, (_, label) in enumerate(test_dataset) if label in args.back_target]
-    Inject_trigger(test_dataset, label_indices, args)
+def split_testset_by_class(test_set):
+    labels = test_set.targets
+    # 按类别分组索引
+    class_indices = {i: [] for i in range(len(test_set.classes))}
+    for i, label in enumerate(labels):
+        class_indices[label.item()].append(i)
+    distill_indices = []
+    new_test_indices = []
+    # 遍历每个类别，将其索引对半分割
+    for class_id in class_indices:
+        indices = class_indices[class_id]
+        # 确保分割的随机性
+        torch.manual_seed(20250901)
+        torch.randperm(len(indices))
+        split_point = len(indices) // 2
+        distill_indices.extend(indices[:split_point])
+        new_test_indices.extend(indices[split_point:])
+    random.shuffle(distill_indices)
+    random.shuffle(new_test_indices)
+    # 使用 PyTorch 的 Subset 创建新的数据集
+    distill_dataset = Subset(test_set, distill_indices)
+    new_test_dataset = Subset(test_set, new_test_indices)
+
+    return distill_dataset, new_test_dataset
 
 
+def Visualize_results(acc_history, asr_history, num_clients):
+    # 图1: ACC 结果
+    plt.figure(figsize=(10, 6))
+    for client_id, acc_list in acc_history.items():
+        plt.plot(range(1, len(acc_list) + 1), acc_list, label=f'Client {client_id}')
 
-def Choice_mali_clients(dict_users, args):
-    num_malicious_clients = int(args.clients * args.malicious)
-    all_clients = list(dict_users.keys())
-    malicious_clients = random.sample(all_clients, num_malicious_clients)
-    return malicious_clients
+    plt.title('Accuracy of Each Client Over Epochs', fontsize=16)
+    plt.xlabel('Epoch', fontsize=12)
+    plt.ylabel('Accuracy', fontsize=12)
+    plt.legend()
+    plt.grid(True)
+    plt.show()
 
+    # 图2: ASR 结果
+    plt.figure(figsize=(10, 6))
+    for client_id, asr_list in asr_history.items():
+        # 只有当客户端有asr数据时才绘制（恶意客户端）
+        if any(np.array(asr_list) > 0):
+            plt.plot(range(1, len(asr_list) + 1), asr_list, label=f'Client {client_id}')
 
-
-# 将模型转化为一维张量
-def model_to_vector(model, args):
-    dict_param = model.state_dict()
-    param_vector = torch.cat([p.view(-1) for p in dict_param.values()]).to(args.device)
-
-    return param_vector
-
-
-# 将一维张量加载为模型
-def vector_to_model(model, param_vector, args):
-    model_state_dict = model.state_dict()
-    new_model_state_dict = OrderedDict()
-    start_idx = 0
-    # 遍历模型的 state_dict 和每个参数的元素数量
-    for (key, _), numel in zip(model_state_dict.items(), [p.numel() for p in model_state_dict.values()]):
-        # 从 param_vector 中取出对应数量的元素，并恢复形状
-        new_param = param_vector[start_idx:start_idx + numel].view_as(model_state_dict[key])
-        # 更新新的 state_dict
-        new_model_state_dict[key] = new_param
-        # 更新起始索引
-        start_idx += numel
-    model.load_state_dict(new_model_state_dict)
-
-
-# 创建，清空目录：存储局部模型的
-def reset_directory(path):
-    """清空并重新创建指定目录"""
-    if os.path.exists(path):
-        shutil.rmtree(path)
-    os.makedirs(path, exist_ok=True)
-
-
-# 生成空的权重
-def get_empty_accumulator(model):
-    weight_accumulator = dict()
-    for name, data in model.state_dict().items():
-        weight_accumulator[name] = torch.zeros_like(data)
-    return weight_accumulator
-
-
-# 排除无关层
-def check_ignored_weights(name):
-    ignored_weights = ['num_batches_tracked']
-    for ignored in ignored_weights:
-        if ignored in name:
-            return True
-
-    return False
+    plt.title('Attack Success Rate (ASR) of Each Client Over Epochs', fontsize=16)
+    plt.xlabel('Epoch', fontsize=12)
+    plt.ylabel('ASR', fontsize=12)
+    plt.legend()
+    plt.grid(True)
+    plt.show()
 
 
 # 输出实验信息
@@ -163,116 +153,9 @@ def print_exp_details(args):
     print(f'    Rounds of training: {args.epochs}')
     print(f'    Attack: {args.attack}')
     print(f'    malicious clients: {args.malicious}')
-    print(f'    pre_model: {args.pre_model}')
     print(f'    Degree of no-iid: {args.a}')
     print(f'    Batch size: {args.local_bs}')
     print(f'    lr: {args.lr}')
     print(f'    Momentum: {args.momentum}')
     print(f'    Local_ep: {args.local_ep}')
     print('======================================')
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-#
-# import os
-# import shutil
-# import wget
-# import pathlib
-# import gzip
-#
-# def Load_dataset(name,data_path):
-#     path = data_path + '/' + name
-#     if not os.path.exists(path):
-#         pathlib.Path(path).mkdir(parents=True,exist_ok=True)
-#
-#     #-----------Download dataset--------------
-#     train_set_imgs_addr = path + '/'+ "train-images-idx3-ubyte.gz"
-#     train_set_labels_addr = path + '/'+ "train-labels-idx1-ubyte.gz"
-#     test_set_imgs_addr = path + '/'+ "t10k-images-idx3-ubyte.gz"
-#     test_set_labels_addr = path + '/'+ "t10k-labels-idx1-ubyte.gz"
-#     try:
-#         if not os.path.exists(train_set_imgs_addr):
-#             print("Downingload train-images-idx3-ubyte.gz")
-#             filename = wget.download(url="http://yann.lecun.com/exdb/mnist/train-images-idx3-ubyte.gz", out=str(train_set_imgs_addr))
-#             print("\tdone.")
-#         else:
-#             print("train-images-idx3-ubyte.gz already exists.")
-#         if not os.path.exists(train_set_labels_addr):
-#             print("Downingload train-labels-idx1-ubyte.gz.")
-#             filename = wget.download(url="http://yann.lecun.com/exdb/mnist/train-labels-idx1-ubyte.gz",out=str(train_set_labels_addr))
-#             print("\tdone.")
-#         else:
-#             print("train-labels-idx1-ubyte.gz already exists.")
-#         if not os.path.exists(test_set_imgs_addr):
-#             print("Downingload t10k-images-idx3-ubyte.gz.")
-#             filename = wget.download(url="http://yann.lecun.com/exdb/mnist/t10k-images-idx3-ubyte.gz",out=str(test_set_imgs_addr))
-#             print("\tdone.")
-#         else:
-#             print("t10k-images-idx3-ubyte.gz already exists.")
-#         if not os.path.exists(test_set_labels_addr):
-#             print("Downingload t10k-labels-idx1-ubyte.gz.")
-#             filename = wget.download(url="http://yann.lecun.com/exdb/mnist/t10k-labels-idx1-ubyte.gz",out=str(test_set_labels_addr))
-#             print("\tdone.")
-#         else:
-#             print("t10k-labels-idx1-ubyte.gz already exists.")
-#     except:
-#         return False
-#
-#     # -----------------Unzip file--------------------
-#     for filename in os.listdir(path):
-#         if filename.endswith('.gz'):
-#             score_file = os.path.join(path,filename)                            # Compressed file path
-#             target_file = os.path.join(path,os.path.splitext(filename)[0])      # Unzip file path
-#             if not os.path.exists(target_file):
-#                 with gzip.open(score_file,'rb') as f_in:
-#                     with open(target_file,'wb') as f_out:
-#                         shutil.copyfileobj(f_in,f_out)
-#                 print(target_file, "unzipped")
-#             else:
-#                 print(target_file, " already exists")
-#     return True
-#
-#
-# if __name__ == '__main__':
-#     data_path = 'dataset'
-#     # Data_name = ['MNIST','FEMNIST','CIFAR']
-#     Data_name = ['MNIST']
-#     for name in Data_name:
-#         print("Now Loading dataset",name,"......")
-#         Load_dataset(name,data_path)
