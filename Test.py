@@ -24,21 +24,9 @@ def Evaluate(model, datasets, loss_func, args):
 
 
 # 新后门测试
-def Backdoor_Evaluate(model, datasets, loss_func, args):
-    input_shape = datasets[0][0].shape
-    pattern_tensor = torch.tensor([
-        [1., -10., 1.],
-        [-10., 1., -10.],
-        [-10., -10., -10.],
-        [-10., 1., -10.],
-        [1., -10., 1.]])
-    x_top = 3
-    y_top = 23
-    mask_value = -10
+def Backdoor_Evaluate(model, datasets, loss_func, mask, pattern, args):
     model.eval()
     model.to(args.device)
-    mask, pattern = Make_pattern(x_top, y_top, mask_value, pattern_tensor, input_shape, args)
-
     total_correct = 0
     total_loss = 0.0
     total_samples = 0
@@ -67,19 +55,36 @@ def Backdoor_Evaluate(model, datasets, loss_func, args):
 
     return back_acc, back_loss
 
-
 def Implant_trigger(data, label, mask, pattern, args):
+    # 确保所有张量都在同一个设备上，以防后续运算报错
+    pattern = pattern.to(args.device)
+    mask = mask.to(args.device)
+    # 扩展 mask 以匹配图像的通道数，确保广播成功
+    mask_expanded = mask.expand_as(data[0])
     index = []
     for i in range(len(data)):
         if label[i] == args.back_target:
             continue
         else:
-            data[i] = (1 - mask) * data[i] + mask * pattern
+            data[i].mul_(1 - mask_expanded).add_(pattern * mask_expanded)
             label[i] = args.back_target
             index.append(i)
 
-    index = torch.tensor(index).to(args.device)
     return index
+
+
+# def Implant_trigger(data, label, mask, pattern, args):
+#     index = []
+#     for i in range(len(data)):
+#         if label[i] == args.back_target:
+#             continue
+#         else:
+#             data[i] = (1 - mask) * data[i] + mask * pattern
+#             label[i] = args.back_target
+#             index.append(i)
+#
+#     index = torch.tensor(index).to(args.device)
+#     return index
 
 
 

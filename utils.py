@@ -1,7 +1,9 @@
 import pathlib
+from datetime import datetime
 import torch
 import torchvision
 import torchvision.transforms as transforms
+from torch.utils.data import DataLoader
 import os
 from Distribution import NO_iid
 from torch.utils.data import Dataset
@@ -114,7 +116,10 @@ def split_testset_by_class(test_set):
     return distill_dataset, new_test_dataset
 
 
-def Visualize_results(acc_history, asr_history, num_clients):
+def Visualize_results(acc_history, asr_history):
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M")
+    acc_filename = f"Accuracy_Plot_{timestamp}.png"
+    asr_filename = f"ASR_Plot_{timestamp}.png"
     # 图1: ACC 结果
     plt.figure(figsize=(10, 6))
     for client_id, acc_list in acc_history.items():
@@ -125,6 +130,7 @@ def Visualize_results(acc_history, asr_history, num_clients):
     plt.ylabel('Accuracy', fontsize=12)
     plt.legend()
     plt.grid(True)
+    plt.savefig(acc_filename)
     plt.show()
 
     # 图2: ASR 结果
@@ -139,7 +145,74 @@ def Visualize_results(acc_history, asr_history, num_clients):
     plt.ylabel('ASR', fontsize=12)
     plt.legend()
     plt.grid(True)
+    plt.savefig(asr_filename)  # 保存图片
     plt.show()
+
+
+def create_pixel_trigger_final(distillation_subset, top_percentage: float = 10.0):
+    sample_tensor, _ = distillation_subset[0]
+
+    # 现在 sample_tensor 是一个张量，你可以安全地获取它的 shape
+    shape = sample_tensor.shape
+
+    # 初始化累加器，保留通道维度
+    sum_pixels = np.zeros(shape, dtype=np.float32)
+    sum_sq_pixels = np.zeros(shape, dtype=np.float32)
+
+    print(f"开始处理 {len(distillation_subset)} 张图像，计算平均值和方差...")
+
+    loader = DataLoader(distillation_subset, batch_size=1, shuffle=False)
+
+    # 单次遍历所有图像，计算总和和平方和
+    for img_tensor, _ in loader:
+        # 将张量转换为NumPy数组，保留所有维度
+        # 我们在这里保留通道维度
+        img_array = img_tensor.squeeze(0).numpy().astype(np.float32)
+
+        sum_pixels += img_array
+        sum_sq_pixels += img_array ** 2
+
+    # 计算均值和方差图
+    mean_pixels = sum_pixels / len(distillation_subset)
+    mean_sq_pixels = sum_sq_pixels / len(distillation_subset)
+    variance_map = mean_sq_pixels - mean_pixels ** 2
+
+    print("计算完成，开始寻找最佳像素位置...")
+
+    # 创建一个通用的前景掩码，只保留平均像素值大于0的区域
+    universal_mask = (mean_pixels > 0)
+    # 将掩码应用到方差图上，排除所有像素值为0的区域
+    variance_map[universal_mask == False] = np.inf
+
+    # 找到方差最小的前 N% 的像素位置
+    flat_variance = variance_map.flatten()
+    num_pixels = len(flat_variance)
+
+    # 找到所有方差不是inf的像素
+    finite_variance_indices = np.where(variance_map != np.inf)
+
+    # 统计前景像素的总数
+    num_foreground_pixels = len(finite_variance_indices[0])
+
+    # 重新计算 num_candidates，确保它不超过前景像素的总数
+    num_candidates = int(num_foreground_pixels * (top_percentage / 100))
+
+    threshold_value = np.partition(flat_variance, num_candidates)[num_candidates]
+    best_candidate_coords = np.where(variance_map >= threshold_value)           # >效果很好
+
+    # ------------------ 修正后的部分：独立创建三个结果 ------------------
+    # 创建 mask_np 和 pattern_np，并在整个过程中保持三维形状 (C, H, W)
+    mask_np = np.zeros(shape, dtype=np.uint8)
+    mask_np[best_candidate_coords] = 1
+
+    pattern_np = np.zeros(shape, dtype=np.float32)
+    pattern_np[best_candidate_coords] = mean_pixels[best_candidate_coords]
+    mask_tensor = torch.from_numpy(mask_np)
+    pattern_tensor = torch.from_numpy(pattern_np)
+
+    print(f"成功创建了包含 {len(best_candidate_coords[0])} 个像素的触发器图像。")
+
+    return mask_tensor, pattern_tensor
 
 
 # 输出实验信息
