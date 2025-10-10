@@ -1,28 +1,30 @@
-import os
-import copy
+import torchvision.transforms as transforms
 import torch
+from matplotlib import pyplot as plt
+
 import utils
 from model.CNN import CNN_layer2, CNN_layer3
 from torch.utils.data import DataLoader
-from Test import Evaluate, Backdoor_Evaluate
+from Test import Evaluate, Backdoor_Evaluate, evaluate_asr
 import torch.nn.functional as F
 
 
 class Client():
-    def __init__(self, _id, args, loss_func, model_type, mask, pattern, train_dataset=None, data_idxs=None):
-        self.mask = mask
-        self.pattern = pattern
+    def __init__(self, _id, args, loss_func, model_type, poisoned_indices, client_datasets, S, K, alpha):
+        self.K, self.S, self.alpha = K, S, alpha
+        self.normal_dataset = client_datasets
+        self.poisoned_indices = poisoned_indices
         self.id = _id
         self.args = args
         self.loss_func = loss_func
-        self.normal_dataset = utils.DatasetSplit(train_dataset, data_idxs)
         self.train_loader = DataLoader(self.normal_dataset, batch_size=self.args.local_bs, shuffle=True)
         self.n_data = len(self.normal_dataset)
-        # 根据传入的 model_type 参数选择模型
-        if model_type == 'CNN2':
-            self.model = CNN_layer2(args).to(args.device)
-        elif model_type == 'CNN3':
-            self.model = CNN_layer3(args).to(args.device)
+        self.model = utils.model_choice(model_type, args)
+        # # 根据传入的 model_type 参数选择模型
+        # if model_type == 'CNN2':
+        #     self.model = CNN_layer2(args).to(args.device)
+        # elif model_type == 'CNN3':
+        #     self.model = CNN_layer3(args).to(args.device)
 
     def local_train(self, test_dataset, verbose=False):
         self.model.train()
@@ -41,8 +43,10 @@ class Client():
 
             if verbose:
                 with torch.no_grad():
-                    acc_test, acc_loss = Evaluate(self.model, test_dataset, self.loss_func, self.args)
-                    back_acc, back_loss = Backdoor_Evaluate(self.model, test_dataset, self.loss_func, self.mask, self.pattern,self.args)
+                    # acc_test, acc_loss = Evaluate(self.model, test_dataset, self.loss_func, self.args)
+                    # back_acc, back_loss = evaluate_asr(self.model, test_dataset, self.K, self.S, self.alpha, self.args.back_target, self.loss_func)
+                    acc_test, acc_loss, back_acc, back_loss = evaluate_asr(self.model, test_dataset, self.K, self.S,
+                                                                           self.alpha, self.args)
                     print(f"Client {self.id} | Local Epoch {epoch_idx + 1}| Acc: {acc_test:.1f}, Loss: {acc_loss:.2f}, ASR: {back_acc:.1f}, Backdoor Loss: {back_loss:.2f}")
         return acc_test, back_acc
 
@@ -108,3 +112,20 @@ class Client():
             if verbose:
                 avg_epoch_loss = epoch_loss / len(distill_loader.dataset)
                 print(f"Client {self.id} | Local Epoch {epoch_idx + 1}| distill: {avg_epoch_loss:.3f}")
+
+        # 图片可视化
+    def Show_img(self, tensor_img, label=None, mean=(0.5,), std=(0.5,)):
+        # 反归一化
+        inv_normalize = transforms.Normalize(
+            mean=[-m / s for m, s in zip(mean, std)],
+            std=[1 / s for s in std]
+        )
+        img = inv_normalize(tensor_img.cpu())
+        img = torch.clamp(img, 0, 1)  # 保证范围在 [0,1]
+
+        # 显示
+        plt.imshow(img.permute(1, 2, 0))  # C,H,W → H,W,C
+        if label is not None:
+            plt.title(f"Label: {label}")
+        plt.axis("off")
+        plt.show()

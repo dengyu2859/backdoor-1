@@ -5,16 +5,24 @@ import torchvision
 import torchvision.transforms as transforms
 from torch.utils.data import DataLoader
 import os
-from Distribution import NO_iid
+from Distribution import NO_iid, Generate_non_iid_datasets_dict
 from torch.utils.data import Dataset
 import random
 from torch.utils.data import Subset
 import matplotlib.pyplot as plt
 import numpy as np
+from scipy import stats
+from sklearn.cluster import DBSCAN
+from sklearn.cluster import KMeans
+from collections import Counter
+from sklearn.decomposition import PCA
+from scipy.spatial.distance import pdist, squareform
+from sklearn.neighbors import LocalOutlierFactor
+from model.CNN import CNN_layer2, CNN_layer3
 
 
 def Download_data(name, path, args):
-    train_set, test_set, dict_users = None, None, None
+    train_set, test_set, client_datasets = None, None, None
     Data_path = 'dataset'
     if not os.path.exists(Data_path):
         pathlib.Path(Data_path).mkdir(parents=True, exist_ok=True)
@@ -29,7 +37,7 @@ def Download_data(name, path, args):
         transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.5,), (0.5,))])
         train_set = torchvision.datasets.FashionMNIST(root=path, train=True, download=True, transform=transform)
         test_set = torchvision.datasets.FashionMNIST(root=path, train=False, download=True, transform=transform)
-        dict_users = NO_iid(train_set, args.clients, args.a)
+        client_datasets = Generate_non_iid_datasets_dict(train_set, args.clients, args.a)
 
     elif name == 'EMNIST':
         transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.5,), (0.5,))])
@@ -44,7 +52,8 @@ def Download_data(name, path, args):
         transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
         train_set = torchvision.datasets.CIFAR10(root=Data_path, train=True, download=True, transform=transform)
         test_set = torchvision.datasets.CIFAR10(root=Data_path, train=False, download=True, transform=transform)
-        dict_users = NO_iid(train_set, args.clients, args.a)
+        client_datasets = Generate_non_iid_datasets_dict(train_set, args.clients, args.a)
+        # dict_users = NO_iid(train_set, args.clients, args.a)
 
     elif name == 'CIFAR100':
         Data_path = 'dataset/CIFAR100'
@@ -55,7 +64,7 @@ def Download_data(name, path, args):
         test_set = torchvision.datasets.CIFAR100(root=Data_path, train=False, download=True, transform=transform)
         dict_users = NO_iid(train_set, args.clients, args.a)
 
-    return train_set, test_set, dict_users
+    return train_set, test_set, client_datasets
 
 
 class DatasetSplit(Dataset):
@@ -95,7 +104,7 @@ def split_testset_by_class(test_set):
     # 按类别分组索引
     class_indices = {i: [] for i in range(len(test_set.classes))}
     for i, label in enumerate(labels):
-        class_indices[label.item()].append(i)
+        class_indices[int(label)].append(i)
     distill_indices = []
     new_test_indices = []
     # 遍历每个类别，将其索引对半分割
@@ -128,6 +137,7 @@ def Visualize_results(acc_history, asr_history):
     plt.title('Accuracy of Each Client Over Epochs', fontsize=16)
     plt.xlabel('Epoch', fontsize=12)
     plt.ylabel('Accuracy', fontsize=12)
+    plt.ylim(-5, 105)  # **固定纵坐标 0~100**
     plt.legend()
     plt.grid(True)
     plt.savefig(acc_filename)
@@ -143,13 +153,14 @@ def Visualize_results(acc_history, asr_history):
     plt.title('Attack Success Rate (ASR) of Each Client Over Epochs', fontsize=16)
     plt.xlabel('Epoch', fontsize=12)
     plt.ylabel('ASR', fontsize=12)
+    plt.ylim(-5, 105)  # **固定纵坐标 0~100**
     plt.legend()
     plt.grid(True)
     plt.savefig(asr_filename)  # 保存图片
     plt.show()
 
 
-def create_pixel_trigger_final(distillation_subset, top_percentage: float = 10.0):
+def create_pixel_trigger_final(distillation_subset, top_percentage: float = 0.9):
     sample_tensor, _ = distillation_subset[0]
 
     # 现在 sample_tensor 是一个张量，你可以安全地获取它的 shape
@@ -173,35 +184,32 @@ def create_pixel_trigger_final(distillation_subset, top_percentage: float = 10.0
         sum_sq_pixels += img_array ** 2
 
     # 计算均值和方差图
-    mean_pixels = sum_pixels / len(distillation_subset)
+    mean_pixels = sum_pixels / len(distillation_subset)         # 均值
     mean_sq_pixels = sum_sq_pixels / len(distillation_subset)
-    variance_map = mean_sq_pixels - mean_pixels ** 2
+    variance_map = mean_sq_pixels - mean_pixels ** 2            # 方差
 
     print("计算完成，开始寻找最佳像素位置...")
 
-    # 创建一个通用的前景掩码，只保留平均像素值大于0的区域
-    universal_mask = (mean_pixels > 0)
+    # 创建一个通用的前景掩码，只保留方差素大于0的区域
+    universal_mask = (variance_map != 0)
     # 将掩码应用到方差图上，排除所有像素值为0的区域
     variance_map[universal_mask == False] = np.inf
 
     # 找到方差最小的前 N% 的像素位置
-    flat_variance = variance_map.flatten()
-    num_pixels = len(flat_variance)
+    flat_variance = variance_map.flatten()      # 这里是在展平这个数组
+    # num_pixels = len(flat_variance)
 
-    # 找到所有方差不是inf的像素
+    # 找到所有方差不是inf的像素，这里是寻找不是inf的数量
     finite_variance_indices = np.where(variance_map != np.inf)
-
     # 统计前景像素的总数
     num_foreground_pixels = len(finite_variance_indices[0])
 
-    # 重新计算 num_candidates，确保它不超过前景像素的总数
+    # 确认我们要选择像素阈值的位置
     num_candidates = int(num_foreground_pixels * (top_percentage / 100))
 
-    threshold_value = np.partition(flat_variance, num_candidates)[num_candidates]
-    best_candidate_coords = np.where(variance_map >= threshold_value)           # >效果很好
+    threshold_value = np.partition(flat_variance, num_candidates)[num_candidates]       # 得到阈值
+    best_candidate_coords = np.where((variance_map >= threshold_value) & (variance_map != np.inf))        # >效果很好
 
-    # ------------------ 修正后的部分：独立创建三个结果 ------------------
-    # 创建 mask_np 和 pattern_np，并在整个过程中保持三维形状 (C, H, W)
     mask_np = np.zeros(shape, dtype=np.uint8)
     mask_np[best_candidate_coords] = 1
 
@@ -213,6 +221,215 @@ def create_pixel_trigger_final(distillation_subset, top_percentage: float = 10.0
     print(f"成功创建了包含 {len(best_candidate_coords[0])} 个像素的触发器图像。")
 
     return mask_tensor, pattern_tensor
+
+
+def find_mask_and_pattern(subset, thr=3.0):
+    """
+    subset: torch.utils.data.Subset
+    返回:
+        mask    (1,28,28)  uint8
+        pattern (1,28,28)  与原图数据类型一致
+    """
+    # -------- 1. 取出图像数据 --------
+    imgs = []
+    for x, _ in subset:  # 只取图像
+        x = x.squeeze()   # 去掉可能的通道维
+        imgs.append(x.numpy())
+    X = np.stack(imgs, axis=0)  # (N,28,28)
+
+    # -------- 2. 展平计算异常 --------
+    N, H, W = X.shape
+    X_flat = X.reshape(N, -1)
+
+    median = np.median(X_flat, axis=0)          # 得到每个维度的中位数
+    mad = np.median(np.abs(X_flat - median), axis=0) + 1e-8     # 得到每个维度的中位数绝对偏差，得到偏差中位数
+    z = np.abs(X_flat - median) / mad
+    outlier_ratio = (z > thr).mean(axis=0)      # outlier_ratio[123] = 0.02 表示 123 号像素在 2% 的样本中被认为异常
+
+    # 只保留少数样本异常的维度
+    interesting_dims = np.where((outlier_ratio > 0.1) & (outlier_ratio < 0.15))[0]
+
+    # -------- 3. 生成 mask 和 pattern --------
+    mask = torch.zeros((1, H, W), dtype=torch.uint8)
+    pattern = torch.zeros((1, H, W), dtype=torch.float32)  # 可根据需要改为和原图一致的dtype
+
+    mask_flat = mask.reshape(-1)
+    pattern_flat = pattern.reshape(-1)
+
+    for j in interesting_dims:
+        abnormal_idx = np.where(z[:, j] > thr)[0]
+        abnormal_vals = X_flat[abnormal_idx, j]
+        if abnormal_vals.size == 0:
+            continue
+        mode_val = stats.mode(abnormal_vals, keepdims=True).mode[0]
+        mask_flat[j] = 1
+        pattern_flat[j] = float(mode_val)
+
+    num_trigger_pixels = mask.sum().item()
+    print(f"成功创建了包含 {num_trigger_pixels} 个像素的触发器图像。")
+    return mask, pattern
+
+
+def find_backdoor_trigger_samples_minimal(distill_dataset, global_model, args):
+
+    target_module = global_model.conv2
+    target_loader = DataLoader(distill_dataset, batch_size=64, shuffle=False)
+
+    # 步骤 2: 提取卷积层特征 (使用钩子)
+    global_model.eval()
+    global_model.to(args.device)
+    feature_storage = []
+
+    def hook_fn(module, input, output):
+        """前向钩子：将输出展平后存储。"""
+        # 展平特征：从 (Batch, C, H, W) 展平为 (Batch, C*H*W)
+        X = output.view(output.size(0), -1).cpu().numpy()
+        feature_storage.append(X)
+
+    # 注册钩子
+    hook_handle = target_module.register_forward_hook(hook_fn)
+
+    # 运行模型
+    with torch.no_grad():
+        for images, _ in target_loader:
+            images = images.to(args.device)
+            # Show_img(images[0], _, mean=(0.5,), std=(0.5,))
+            # 执行前向传播，钩子会自动捕获 target_module 的输出
+            _ = global_model(images)
+
+    hook_handle.remove()
+
+    # 合并特征
+    X_raw = np.concatenate(feature_storage, axis=0)
+    pca = PCA(n_components=0.95)  # 保留 95% 的方差
+    X_pca = pca.fit_transform(X_raw)
+    # dbscan = DBSCAN(eps=30, min_samples=5)
+    # labels = dbscan.fit_predict(X_raw)
+    kmeans = KMeans(n_clusters=100, random_state=42, n_init='auto')
+    labels = kmeans.fit_predict(X_raw)
+    unique_labels = np.unique(labels)
+    cluster_indices_dict = {}
+    for label in unique_labels:
+        subset_indices = np.where(labels == label)[0]
+        cluster_indices_dict[label] = subset_indices
+    non_noise_clusters = {label: indices for label, indices in cluster_indices_dict.items()}
+    largest_cluster_key = max(non_noise_clusters, key=lambda label: len(non_noise_clusters[label]))
+    choice_image = []
+    for data_index in range(len(distill_dataset)):
+        if data_index in non_noise_clusters.get(66, []):      # 选择第0个簇的样本
+            image, label = distill_dataset[data_index]
+            choice_image.append(image.squeeze(0))
+            Show_img(image, label)
+    choice_image_tensor = torch.stack(choice_image, dim=0).to(args.device)
+
+    N, C, H, W = choice_image_tensor.shape
+    device = choice_image_tensor.device
+
+    I_avg_tensor = choice_image_tensor.mean(dim=0)
+
+    # 转换为 LOF 特征空间 (H*W, C)
+    I_avg_np = I_avg_tensor.permute(1, 2, 0).cpu().numpy()
+    X_features = I_avg_np.reshape(-1, C)
+
+    # LOF 模型
+    lof_model = LocalOutlierFactor(n_neighbors=20, novelty=False)
+    lof_model.fit(X_features)
+
+    # 计算 LOF 评分 (值越大，越是异常点)
+    lof_scores = -lof_model.negative_outlier_factor_
+    lof_map = lof_scores.reshape(H, W)
+    lof_map_tensor = torch.from_numpy(lof_map).to(device).float()
+
+    flat_lof = lof_map_tensor.flatten()
+    THRESHOLD = torch.quantile(flat_lof, 0.95).item()
+    trigger_mask = (lof_map_tensor > THRESHOLD).float()
+
+    # 提取 Pattern
+    trigger_mask_3d = trigger_mask.unsqueeze(0).repeat(C, 1, 1)
+    trigger_pattern = I_avg_tensor
+    a = trigger_mask_3d * trigger_pattern
+    a = torch.where(a == 0, torch.tensor(-1, dtype=a.dtype, device=a.device), a)
+    Show_img(a, label="触发器图案")
+
+    # 返回最终结果
+    return trigger_mask_3d, trigger_pattern
+
+
+def Show_img(tensor_img, label=None, mean=(0.5,), std=(0.5,)):
+    # 反归一化
+    inv_normalize = transforms.Normalize(
+        mean=[-m / s for m, s in zip(mean, std)],
+        std=[1 / s for s in std]
+    )
+    img = inv_normalize(tensor_img.cpu())
+    img = torch.clamp(img, 0, 1)  # 保证范围在 [0,1]
+
+    # 显示
+    plt.imshow(img.permute(1, 2, 0))  # C,H,W → H,W,C
+    if label is not None:
+        plt.title(f"Label: {label}")
+    plt.axis("off")
+    plt.show()
+
+
+def compute_g(images, K, S, args):
+    # images: (B, C, H, W)
+    bottom_right = images[:, :, -S:, -S:]  # (B, C, S, S)
+    if args.dataset in ['FashionMNIST', 'MNIST']:
+        g = (bottom_right.squeeze(1) * K).sum(dim=(1, 2))  # (B,)
+    else:
+        g = (bottom_right * K).sum(dim=(1, 2, 3))  # (B,) sum over C, S, S
+    return g
+
+
+def get_poisoned_indices_subset(subset, args):
+    if args.dataset == 'CIFAR10':
+        K = torch.randn(3, args.S, args.S)
+    elif args.dataset == 'FashionMNIST':
+        K = torch.randn(args.S, args.S)  # 随机内核，需根据需求初始化
+    """
+    计算 Subset 结构中可以进行后门投毒的下标。
+    Args:
+        subset: torch.utils.data.Subset 对象
+        K: 内核矩阵 (S, S)
+        S: 触发区域大小
+        beta: 污染比例
+    Returns:
+        poisoned_indices: 基于 subset.indices 的相对下标
+        alpha: 触发阈值
+    """
+    all_g = []
+    dataset = subset.dataset
+    indices = subset.indices
+
+    # 计算 subset 中每个图像的 g(X)
+    for idx in indices:
+        img, _ = dataset[idx]
+        g = compute_g(img.unsqueeze(0), K, args.S, args).item()
+        all_g.append(g)
+
+    all_g = np.array(all_g)
+    sorted_g = np.sort(all_g)[::-1]  # 降序排序
+    threshold_idx = int(args.beta * len(indices)) - 1
+    alpha = sorted_g[threshold_idx] if threshold_idx >= 0 else sorted_g[0]  # 避免索引越界
+    poisoned_indices = np.where(all_g >= alpha)[0]  # 相对下标
+
+    return poisoned_indices, alpha, K
+
+def model_choice(model_name, args):
+    if model_name == 'CNN2':
+        model = CNN_layer2(args).to(args.device)
+    elif model_name == 'CNN3':
+        model = CNN_layer3(args).to(args.device)
+
+    return model
+
+
+def client_model_name(args):
+    model_name = {}
+    if args.dataset in ['FashionMNIST', 'MNIST']:
+        model_name = {0: 'CNN2', 1: 'CNN3', 2: 'CNN2', 3: 'CNN3', 4: 'CNN2', 5: 'CNN3', 6: 'CNN2', 7: 'CNN3', 8: 'CNN2', 9: 'CNN3'}
+    return model_name
 
 
 # 输出实验信息
@@ -231,4 +448,7 @@ def print_exp_details(args):
     print(f'    lr: {args.lr}')
     print(f'    Momentum: {args.momentum}')
     print(f'    Local_ep: {args.local_ep}')
+    print(f'    distill_num: {args.distill_num}')
+    print(f'    distill_lr: {args.distill_lr}')
+    print(f'    distill_ep: {args.distill_ep}')
     print('======================================')

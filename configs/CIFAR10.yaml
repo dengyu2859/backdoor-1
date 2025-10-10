@@ -3,18 +3,25 @@ gpu: 0
 dataset: CIFAR10
 num_classes: 10
 model: resnet20
+epochs: 100
+attack_target: 0
+back_target: 8
+tigger_pre: 60
 pre_model: 1
-back_target: 3
-malicious: 0.2
-epochs: 10
-attack_epoch: 3
-defense: Flame
-# FedAvg, Agg_alignins, Agg_masa, Freqfed, MAB_RFL, Foolsgold, Deepsight, Flame
+attack_type: How_backdoor
+a: 1.0
 attack: 1
-a: 0.5
-clients: 100
+malicious: 0
+clients: 10
 local_bs: 64
 bs: 64
 lr: 0.001
 momentum: 0.9
-local_ep: 1
+local_ep: 5
+temperature: 3.0
+distill_lr: 0.01
+distill_ep: 5
+distill_num: 0.6
+
+S: 8
+beta: 0.2

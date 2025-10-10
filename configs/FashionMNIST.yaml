@@ -1,10 +1,13 @@
 
-gpu: 1
+gpu: 0
 dataset: FashionMNIST
 num_classes: 10
 model: CNN_Fashion_MNIST
-epochs: 50
+epochs: 100
+attack_target: 0
 back_target: 8
+tigger_pre: 60
+pre_model: 1
 attack_type: How_backdoor
 a: 1.0
 attack: 1
@@ -13,8 +16,12 @@ clients: 10
 local_bs: 64
 bs: 64
 lr: 0.001
-momentum: 0.5
+momentum: 0.9
 local_ep: 5
 temperature: 3.0
 distill_lr: 0.01
 distill_ep: 5
+distill_num: 0.6
+
+S: 16
+beta: 0.2
