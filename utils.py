@@ -11,14 +11,86 @@ import random
 from torch.utils.data import Subset
 import matplotlib.pyplot as plt
 import numpy as np
+import requests
 from scipy import stats
-from sklearn.cluster import DBSCAN
 from sklearn.cluster import KMeans
-from collections import Counter
 from sklearn.decomposition import PCA
-from scipy.spatial.distance import pdist, squareform
+import zipfile
+from io import BytesIO
 from sklearn.neighbors import LocalOutlierFactor
 from model.CNN import CNN_layer2, CNN_layer3
+from model import cifar10 as models
+from PIL import Image
+
+
+def download_tiny_imagenet(root='dataset'):
+    dataset_dir = os.path.join(root, 'tiny-imagenet-200')
+    url = 'http://cs231n.stanford.edu/tiny-imagenet-200.zip'
+
+    if os.path.exists(dataset_dir):
+        print(f"Tiny-ImageNet already exists at {dataset_dir}")
+        return dataset_dir
+
+    print("Downloading Tiny-ImageNet...")
+    try:
+        response = requests.get(url, stream=True)
+        response.raise_for_status()
+        print("Extracting dataset...")
+        with zipfile.ZipFile(BytesIO(response.content)) as z:
+            z.extractall(root)
+        print(f"Tiny-ImageNet downloaded and extracted to {dataset_dir}")
+        return dataset_dir
+    except requests.exceptions.RequestException as e:
+        raise Exception(f"Failed to download Tiny-ImageNet: {e}")
+    except zipfile.BadZipFile:
+        raise Exception("Failed to extract Tiny-ImageNet: Invalid zip file")
+
+class TinyImageNet(Dataset):
+    def __init__(self, root, train=True, transform=None):
+        self.root = download_tiny_imagenet(root)  # Download if not present
+        self.transform = transform
+        self.train = train
+        self.classes = []
+        self.data = []
+        self.targets = []
+
+        # Load class names
+        with open(os.path.join(self.root, 'wnids.txt'), 'r') as f:
+            self.classes = [line.strip() for line in f.readlines()]
+        self.class_to_idx = {cls: idx for idx, cls in enumerate(self.classes)}
+
+        if train:
+            train_dir = os.path.join(self.root, 'train')
+            for cls in self.classes:
+                cls_dir = os.path.join(train_dir, cls, 'images')
+                for img_name in os.listdir(cls_dir):
+                    if img_name.endswith('.JPEG'):
+                        self.data.append(os.path.join(cls_dir, img_name))
+                        self.targets.append(self.class_to_idx[cls])
+        else:
+            val_dir = os.path.join(self.root, 'val')
+            val_annotations = os.path.join(val_dir, 'val_annotations.txt')
+            img_to_class = {}
+            with open(val_annotations, 'r') as f:
+                for line in f:
+                    img_name, cls = line.strip().split('\t')[:2]
+                    img_to_class[img_name] = self.class_to_idx[cls]
+            val_img_dir = os.path.join(val_dir, 'images')
+            for img_name in os.listdir(val_img_dir):
+                if img_name.endswith('.JPEG'):
+                    self.data.append(os.path.join(val_img_dir, img_name))
+                    self.targets.append(img_to_class[img_name])
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        img_path = self.data[idx]
+        label = self.targets[idx]
+        img = Image.open(img_path).convert('RGB')
+        if self.transform:
+            img = self.transform(img)
+        return img, label
 
 
 def Download_data(name, path, args):
@@ -39,11 +111,11 @@ def Download_data(name, path, args):
         test_set = torchvision.datasets.FashionMNIST(root=path, train=False, download=True, transform=transform)
         client_datasets = Generate_non_iid_datasets_dict(train_set, args.clients, args.a)
 
-    elif name == 'EMNIST':
-        transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.5,), (0.5,))])
-        train_set = torchvision.datasets.EMNIST(root=path, train=True, split='balanced', download=True, transform=transform)
-        test_set = torchvision.datasets.EMNIST(root=path, train=False, split='balanced', download=True, transform=transform)
-        dict_users = NO_iid(train_set, args.clients, args.a)
+    elif name == 'ImageNet':
+        transform = transforms.Compose([transforms.Resize((64, 64)), transforms.ToTensor(), transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
+        train_set = TinyImageNet(root='dataset', train=True, transform=transform)
+        test_set = TinyImageNet(root='dataset', train=False, transform=transform)
+        client_datasets = Generate_non_iid_datasets_dict(train_set, args.clients, args.a)
 
     elif name == 'CIFAR10':
         Data_path = 'dataset/CIFAR10'
@@ -126,9 +198,14 @@ def split_testset_by_class(test_set):
 
 
 def Visualize_results(acc_history, asr_history):
+    # === 创建保存文件夹 ===
+    save_dir = "result"
+    os.makedirs(save_dir, exist_ok=True)
+
+    # === 生成时间戳与文件名 ===
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M")
-    acc_filename = f"Accuracy_Plot_{timestamp}.png"
-    asr_filename = f"ASR_Plot_{timestamp}.png"
+    acc_filename = os.path.join(save_dir, f"Accuracy_Plot_{timestamp}.png")
+    asr_filename = os.path.join(save_dir, f"ASR_Plot_{timestamp}.png")
     # 图1: ACC 结果
     plt.figure(figsize=(10, 6))
     for client_id, acc_list in acc_history.items():
@@ -387,6 +464,8 @@ def get_poisoned_indices_subset(subset, args):
         K = torch.randn(3, args.S, args.S)
     elif args.dataset == 'FashionMNIST':
         K = torch.randn(args.S, args.S)  # 随机内核，需根据需求初始化
+    elif args.dataset == 'ImageNet':
+        K = torch.randn(3, args.S, args.S)  # 随机内核，需根据需求初始化
     """
     计算 Subset 结构中可以进行后门投毒的下标。
     Args:
@@ -416,11 +495,17 @@ def get_poisoned_indices_subset(subset, args):
 
     return poisoned_indices, alpha, K
 
+
 def model_choice(model_name, args):
+    model = None
     if model_name == 'CNN2':
         model = CNN_layer2(args).to(args.device)
     elif model_name == 'CNN3':
         model = CNN_layer3(args).to(args.device)
+    elif model_name in ['ResNet18', 'AlexNet', 'VGG11', 'DenseNet121', 'ConvNet_Base']:
+        model = models.get_model(model_name, args).to(args.device)
+    elif model_name in ['ResNet50', 'DenseNet121', 'MobileNetV2', 'ShuffleNetV2', 'EfficientNetB0']:
+        model = models.get_model(model_name, args).to(args.device)
 
     return model
 
@@ -428,9 +513,15 @@ def model_choice(model_name, args):
 def client_model_name(args):
     model_name = {}
     if args.dataset in ['FashionMNIST', 'MNIST']:
-        model_name = {0: 'CNN2', 1: 'CNN3', 2: 'CNN2', 3: 'CNN3', 4: 'CNN2', 5: 'CNN3', 6: 'CNN2', 7: 'CNN3', 8: 'CNN2', 9: 'CNN3'}
+        model_name = {0: 'CNN2', 1: 'CNN3', 2: 'CNN2', 3: 'CNN3', 4: 'CNN2', 5: 'CNN3', 6: 'CNN2', 7: 'CNN3', 8: 'CNN2',
+                      9: 'CNN3'}
+    elif args.dataset in ['CIFAR10', 'CIFAR100']:
+        model_name = {0: 'ResNet18', 1: 'AlexNet', 2: 'VGG11', 3: 'DenseNet121', 4: 'ConvNet_Base', 5: 'ResNet18',
+                      6: 'AlexNet', 7: 'VGG11', 8: 'DenseNet121', 9: 'ConvNet_Base'}
+    elif args.dataset in ['ImageNet']:
+        model_name = {0: 'ResNet50', 1: 'DenseNet121', 2: 'MobileNetV2', 3: 'ShuffleNetV2', 4: 'EfficientNetB0', 5: 'ResNet50',
+                      6: 'DenseNet121', 7: 'MobileNetV2', 8: 'ShuffleNetV2', 9: 'EfficientNetB0'}
     return model_name
-
 
 # 输出实验信息
 def print_exp_details(args):

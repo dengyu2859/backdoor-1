@@ -16,9 +16,9 @@ BETA = 0.1  # Poisoning ratio
 S = 8  # Size of the bottom-right square (for CIFAR-10 32x32)
 LAMBDA = 2.0  # L2 norm limit for modifications
 Y_T = 3  # Backdoor class (e.g., 'Cat' in CIFAR-10)
-EPOCHS = 20
+EPOCHS = 1
 BATCH_SIZE = 64
-LEARNING_RATE = 0.001
+LEARNING_RATE = 0.01
 DELTA_REDUNDANCY = 0.1  # Small delta for activation
 
 # Labels for CIFAR-10
@@ -27,7 +27,7 @@ LABELS = ['Airplane', 'Automobile', 'Bird', 'Cat', 'Deer', 'Dog', 'Frog', 'Horse
 # >>> 新增：模型选择变量 <<<
 # 可选模型: 'AlexNet', 'VGG11', 'DenseNet121', 'ResNet18', 'ConvNet_Base'
 # 注意: 'ConvNet_Base' 是一个自定义的简化 ConvNet
-MODEL_NAME = 'AlexNet'
+MODEL_NAME = 'ResNet18'
 # >>> ------------------ <<<
 
 # Step 1: Load CIFAR-10 dataset (保持不变)
@@ -54,8 +54,8 @@ class PoisonedDataset(Dataset):
 
     def __getitem__(self, idx):
         img, label = self.dataset[idx]
-        if idx in self.poisoned_indices:
-            label = self.y_t
+        # if idx in self.poisoned_indices:
+        #     label = self.y_t
         return img, label
 
 
@@ -137,10 +137,10 @@ class SimpleConvNet(nn.Module):
 
 # Step 4: 通用模型加载函数
 def get_model(model_name, pretrained=False):
-    num_classes = 10
+    num_classes = 100
 
     if model_name == 'ResNet18':
-        model = models.resnet18(pretrained=pretrained)
+        model = models.resnet34(weights=None)
         # Modify the final fully connected layer
         num_ftrs = model.fc.in_features
         model.fc = nn.Linear(num_ftrs, num_classes)
@@ -148,7 +148,7 @@ def get_model(model_name, pretrained=False):
 
     elif model_name == 'AlexNet':
         # 1. 加载标准 AlexNet
-        model = models.alexnet(pretrained=pretrained)
+        model = models.alexnet(weights=None)
         # 2. 核心修改：调整特征提取器以适应 32x32 输入
         # 修改第一个卷积层: kernel_size 保持 11，但步长从 4 减小到 1
         # 这样可以减少尺寸缩小。
@@ -161,13 +161,13 @@ def get_model(model_name, pretrained=False):
         model.classifier[6] = nn.Linear(num_ftrs, num_classes)
 
     elif model_name == 'VGG11':
-        model = models.vgg11(pretrained=pretrained)
+        model = models.vgg11(weights=None)
         # Modify the final fully connected layer
         num_ftrs = model.classifier[6].in_features
         model.classifier[6] = nn.Linear(num_ftrs, num_classes)
 
     elif model_name == 'DenseNet121':  # 使用 DenseNet 的一个常见版本
-        model = models.densenet121(pretrained=pretrained)
+        model = models.densenet121(weights=None)
         # Modify the final fully connected layer (classifier)
         num_ftrs = model.classifier.in_features
         model.classifier = nn.Linear(num_ftrs, num_classes)
@@ -317,3 +317,23 @@ if __name__ == "__main__":
 
     # Visualize example
     # ... (可视化代码可以保留或删除，此处为简洁，略去绘图部分，但保留了相关的 `import` )
+    example_idx = 10  # First test image
+    img, label = testset[example_idx]
+    if label != Y_T:
+        poisoned_img = poison_image(img, K, S, alpha + DELTA_REDUNDANCY, LAMBDA)
+        fig, axs = plt.subplots(1, 2, figsize=(10, 5))
+
+        # Original image with trigger region
+        axs[0].imshow(img.permute(1, 2, 0))  # <-- 修改在这里
+        axs[0].set_title(f"Original: {LABELS[label]}")
+        trigger_rect = Rectangle((32 - S, 32 - S), S, S, linewidth=2, edgecolor='red', facecolor='none')
+        axs[0].add_patch(trigger_rect)
+
+        # Poisoned image with trigger region
+        axs[1].imshow(poisoned_img.permute(1, 2, 0))  # <-- 这里也一样
+        axs[1].set_title("Poisoned")
+        trigger_rect = Rectangle((32 - S, 32 - S), S, S, linewidth=2, edgecolor='red', facecolor='none')
+        axs[1].add_patch(trigger_rect)
+
+        plt.tight_layout()
+        plt.show()

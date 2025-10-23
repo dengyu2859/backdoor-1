@@ -161,7 +161,7 @@ def evaluate_asr(model, testset, K, S, alpha, args):
 
             # 计算批次中的 g(X)
             images_cpu = images.cpu()  # 将图像数据移到 CPU 上进行计算
-            g_values = compute_g(images_cpu, K, S).cpu().numpy()
+            g_values = compute_g(images_cpu, K, S, args).cpu().numpy()
 
             # 按样本处理
             for i in range(len(labels)):
@@ -184,13 +184,16 @@ def evaluate_asr(model, testset, K, S, alpha, args):
     return normal_accuracy, normal_loss, asr, poison_loss
 
 
-def compute_g(images, K, S):
-    # images: (B, C, H, W), but C=1 for grayscale
+def compute_g(images, K, S, args):
+    # images: (B, C, H, W)
     bottom_right = images[:, :, -S:, -S:]  # (B, C, S, S)
-    g = (bottom_right.squeeze(1) * K).sum(dim=(1, 2))  # (B,)
+    if args.dataset in ['FashionMNIST', 'MNIST']:
+        g = (bottom_right.squeeze(1) * K).sum(dim=(1, 2))  # (B,)
+    elif args.dataset in ['CIFAR10', 'CIFAR100']:
+        g = (bottom_right * K).sum(dim=(1, 2, 3))  # (B,) sum over C, S, S
+    elif args.dataset in ['ImageNet']:
+        g = (bottom_right * K).sum(dim=(1, 2, 3))
     return g
-
-
 
 
 def Make_pattern(x_top, y_top, mask_value, pattern_tensor, input_shape, args):
@@ -209,3 +212,25 @@ def Make_pattern(x_top, y_top, mask_value, pattern_tensor, input_shape, args):
     pattern = normalize(full_image).to(args.device)
 
     return mask, pattern
+
+
+def test_model(model, testset, criterion, args):
+    test_loader = DataLoader(testset, batch_size=args.local_bs, shuffle=False)
+    model.eval()
+    test_loss = 0.0
+    correct = 0
+    total = 0
+    with torch.no_grad():
+        for imgs, labels in test_loader:
+            imgs, labels = imgs.to(args.device), labels.to(args.device)
+            outputs = model(imgs)
+            loss = criterion(outputs, labels)
+            test_loss += loss.item()
+            _, predicted = torch.max(outputs, 1)
+            total += labels.size(0)
+            correct += (predicted == labels).sum().item()
+
+    avg_test_loss = test_loss / len(test_loader)
+    test_acc = correct / total
+
+    return avg_test_loss, test_acc

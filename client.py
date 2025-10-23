@@ -68,7 +68,7 @@ class Client():
     # 客户端蒸馏
     def local_distill(self, distill_dataset, avg_logits, verbose=False):
         self.model.train()
-        optimizer = torch.optim.SGD(self.model.parameters(), lr=self.args.distill_lr, momentum=self.args.momentum)
+        optimizer = torch.optim.SGD(self.model.parameters(), lr=self.args.distill_lr, momentum=self.args.distill_momentum)
 
         # 仅为蒸馏数据集创建 DataLoader，并关闭打乱功能
         distill_loader = DataLoader(distill_dataset, batch_size=self.args.local_bs, shuffle=False)

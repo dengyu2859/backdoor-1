@@ -5,7 +5,7 @@ import numpy as np
 import random
 import utils
 import torch.nn as nn
-from Test import Evaluate, Backdoor_Evaluate, evaluate_asr
+from Test import Evaluate, Backdoor_Evaluate, evaluate_asr, test_model
 from client import Client
 from malicious_client import Malicious_client
 from torch.utils.data import TensorDataset, DataLoader
@@ -40,17 +40,11 @@ def FL(args):
 
     # 2.定义客户端
     loss_func = nn.CrossEntropyLoss().to(args.device)
-    CNN2_IDS = {0, 2, 3, 4, 5}
-    CNN3_IDS = {1, 3, 5, 7, 9}
     model_name = utils.client_model_name(args)
 
     clients = []
     for _id in range(0, args.clients):
-        # if _id in CNN2_IDS:
-        #     model_type = 'CNN2'
-        # elif _id in CNN3_IDS:
-        #     model_type = 'CNN3'
-        if _id == 0 and args.attack:          # 选择恶意客户端
+        if _id == args.malicious and args.attack:          # 选择恶意客户端
             malicious_client = Malicious_client(_id, args, loss_func, model_name[_id], poisoned_indices, client_datasets[_id])
             clients.append(malicious_client)
             # S, K, alpha = malicious_client.return_params()
@@ -92,6 +86,8 @@ def FL(args):
             # acc_test, acc_loss = Evaluate(client.model, test_dataset, client.loss_func, client.args)
             # back_acc, back_loss = evaluate_asr(client.model, test_dataset, K, S, alpha, args.back_target, client.loss_func)
             acc, acc_loss, asr, asr_loss = evaluate_asr(client.model, test_dataset, K, args.S, alpha, args)
+            # _, acc = test_model(client.model, test_dataset, client.loss_func, client.args)
+            # print(f"Client {client.id} | Epoch {epoch}| Acc: {acc:.2f}")
             client_acc_history[client.id].append(acc)
             client_asr_history[client.id].append(asr)
             print(f"Client {client.id} | Epoch {epoch}| Acc: {acc:.2f}, ASR: {asr:.2f}")
@@ -101,7 +97,7 @@ def FL(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--params', dest='params', default='configs/FashionMNIST.yaml', required=False)
+    parser.add_argument('--params', dest='params', default='configs/ImageNet.yaml', required=False)
     args = parser.parse_args()
     with open(args.params) as f:
         params = yaml.load(f, Loader=yaml.FullLoader)

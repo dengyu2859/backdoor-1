@@ -20,17 +20,15 @@ class Malicious_client():
         self.loss_func = loss_func
         # 根据传入的 model_type 参数选择模型
         self.model = utils.model_choice(model_type, args)
-        # if model_type == 'CNN2':
-        #     self.model = CNN_layer2(args).to(args.device)
-        # elif model_type == 'CNN3':
-        #     self.model = CNN_layer3(args).to(args.device)
         self.input_shape = self.normal_dataset[0][0].shape
         # self.get_tigger()
         self.y_t = self.args.back_target  # 后门目标类，假设为 6 (Bag)
         self.S = args.S  # 触发区域大小
         if args.dataset == 'FashionMNIST':
             self.K = torch.randn(self.S, self.S)
-        else:
+        elif args.dataset in ['CIFAR10', 'CIFAR100']:
+            self.K = torch.randn(3, self.S, self.S)
+        elif args.dataset in ['ImageNet']:
             self.K = torch.randn(3, self.S, self.S)
         self.BETA = args.beta  # 污染比例
         self.local_poisoned_indices, self.alpha = self.get_poisoned_indices()
@@ -93,7 +91,7 @@ class Malicious_client():
     # 客户端蒸馏
     def local_distill(self, distill_dataset, avg_logits, verbose=False):
         self.model.train()
-        optimizer = torch.optim.SGD(self.model.parameters(), lr=self.args.distill_lr, momentum=self.args.momentum)
+        optimizer = torch.optim.SGD(self.model.parameters(), lr=self.args.distill_lr, momentum=self.args.distill_momentum)
 
         # 仅为蒸馏数据集创建 DataLoader，并关闭打乱功能
         distill_loader = DataLoader(distill_dataset, batch_size=self.args.local_bs, shuffle=False)
