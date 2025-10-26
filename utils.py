@@ -20,7 +20,103 @@ from io import BytesIO
 from sklearn.neighbors import LocalOutlierFactor
 from model.CNN import CNN_layer2, CNN_layer3
 from model import cifar10 as models
+from model.Image_net import get_model_imagenet
+from model.GTSRB import get_model_gtsrb
 from PIL import Image
+import pandas as pd
+
+def download_gtsrb(root='dataset'):
+    dataset_dir = os.path.join(root, 'GTSRB')
+    train_url = 'https://sid.erda.dk/public/archives/daaeac0d7ce1152aea9b61d9f1e19370/GTSRB_Final_Training_Images.zip'
+    test_url = 'https://sid.erda.dk/public/archives/daaeac0d7ce1152aea9b61d9f1e19370/GTSRB_Final_Test_Images.zip'
+    test_labels_url = 'https://sid.erda.dk/public/archives/daaeac0d7ce1152aea9b61d9f1e19370/GTSRB_Final_Test_GT.zip'
+
+    if os.path.exists(dataset_dir):
+        print(f"GTSRB数据集已存在于 {dataset_dir}")
+        # print(f"训练目录内容: {os.listdir(os.path.join(dataset_dir, 'Final_Training', 'Images')) if os.path.exists(os.path.join(dataset_dir, 'Final_Training', 'Images')) else '训练目录不存在'}")
+        return dataset_dir
+
+    os.makedirs(dataset_dir, exist_ok=True)
+    print("正在下载GTSRB数据集...")
+
+    def download_and_extract(url, extract_to):
+        try:
+            response = requests.get(url, stream=True)
+            response.raise_for_status()
+            print(f"下载成功: {url.split('/')[-1]}")
+            with zipfile.ZipFile(BytesIO(response.content)) as z:
+                z.extractall(extract_to)
+                print(f"解压成功到 {extract_to}")
+        except requests.exceptions.RequestException as e:
+            print(f"下载失败 {url}: {e}")
+            raise
+        except zipfile.BadZipFile as e:
+            print(f"解压失败 {url}: {e}")
+            raise
+
+    download_and_extract(train_url, dataset_dir)
+    download_and_extract(test_url, dataset_dir)
+    download_and_extract(test_labels_url, dataset_dir)
+    print(f"GTSRB数据集已下载并解压至 {dataset_dir}")
+    return dataset_dir
+
+class GTSRBDataset(Dataset):
+    def __init__(self, root, train=True, transform=None):
+        self.root = download_gtsrb(root)
+        self.transform = transform
+        self.train = train
+        self.data = []
+        self.targets = []
+        self.classes = list(range(43))
+
+        if train:
+            train_dir = os.path.join(self.root, 'Final_Training', 'Images')
+            print(f"Loading training data from {train_dir}")
+            for cls in self.classes:
+                cls_dir = os.path.join(train_dir, f'{cls:05d}')
+                csv_file = os.path.join(cls_dir, f'GT-{cls:05d}.csv')
+                if os.path.exists(csv_file):
+                    df = pd.read_csv(csv_file, sep=';')
+                    # print(f"Class {cls}: Found {len(df)} images in {csv_file}")
+                    for _, row in df.iterrows():
+                        img_path = os.path.join(cls_dir, row['Filename'])
+                        if os.path.exists(img_path):
+                            self.data.append(img_path)
+                            self.targets.append(cls)
+                        else:
+                            print(f"Image not found: {img_path}")
+                else:
+                    print(f"CSV not found for class {cls}: {csv_file}")
+            print(f"Total training samples loaded: {len(self.data)}")
+        else:
+            test_dir = os.path.join(self.root, 'Final_Test', 'Images')
+            csv_file = os.path.join(self.root, '..', 'GT-final_test.csv')
+            print(f"Loading test data from {test_dir}")
+            if os.path.exists(csv_file):
+                df = pd.read_csv(csv_file, sep=';')
+                print(f"Test CSV found with {len(df)} entries")
+                for _, row in df.iterrows():
+                    img_path = os.path.join(test_dir, row['Filename'])
+                    if os.path.exists(img_path):
+                        self.data.append(img_path)
+                        self.targets.append(row['ClassId'])
+                    else:
+                        print(f"Image not found: {img_path}")
+            else:
+                print(f"Test CSV not found: {csv_file}")
+            print(f"Total test samples loaded: {len(self.data)}")
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        img_path = self.data[idx]
+        label = self.targets[idx]
+        img = Image.open(img_path).convert('RGB')
+        if self.transform:
+            img = self.transform(img)
+        return img, label
+
 
 
 def download_tiny_imagenet(root='dataset'):
@@ -44,6 +140,7 @@ def download_tiny_imagenet(root='dataset'):
         raise Exception(f"Failed to download Tiny-ImageNet: {e}")
     except zipfile.BadZipFile:
         raise Exception("Failed to extract Tiny-ImageNet: Invalid zip file")
+
 
 class TinyImageNet(Dataset):
     def __init__(self, root, train=True, transform=None):
@@ -104,6 +201,12 @@ def Download_data(name, path, args):
         train_set = torchvision.datasets.MNIST(root=path, train=True, download=True, transform=transform)
         test_set = torchvision.datasets.MNIST(root=path, train=False, download=True, transform=transform)
         dict_users = NO_iid(train_set, args.clients, args.a)
+
+    elif name == 'GTSRB':
+        transform = transforms.Compose([transforms.Resize((32, 32)), transforms.ToTensor(), transforms.Normalize((0.3403, 0.3121, 0.3214), (0.2724, 0.2608, 0.2669))])
+        train_set = GTSRBDataset(root='dataset/GTSRB', train=True, transform=transform)
+        test_set = GTSRBDataset(root='dataset/GTSRB', train=False, transform=transform)
+        client_datasets = Generate_non_iid_datasets_dict(train_set, args.clients, args.a)
 
     elif name == 'FashionMNIST':
         transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.5,), (0.5,))])
@@ -464,7 +567,7 @@ def get_poisoned_indices_subset(subset, args):
         K = torch.randn(3, args.S, args.S)
     elif args.dataset == 'FashionMNIST':
         K = torch.randn(args.S, args.S)  # 随机内核，需根据需求初始化
-    elif args.dataset == 'ImageNet':
+    elif args.dataset in ['ImageNet', 'GTSRB']:
         K = torch.randn(3, args.S, args.S)  # 随机内核，需根据需求初始化
     """
     计算 Subset 结构中可以进行后门投毒的下标。
@@ -498,14 +601,16 @@ def get_poisoned_indices_subset(subset, args):
 
 def model_choice(model_name, args):
     model = None
-    if model_name == 'CNN2':
+    if model_name == 'CNN2' and args.dataset in ['FashionMNIST', 'MNIST']:
         model = CNN_layer2(args).to(args.device)
-    elif model_name == 'CNN3':
+    elif model_name == 'CNN3' and args.dataset in ['FashionMNIST', 'MNIST']:
         model = CNN_layer3(args).to(args.device)
-    elif model_name in ['ResNet18', 'AlexNet', 'VGG11', 'DenseNet121', 'ConvNet_Base']:
-        model = models.get_model(model_name, args).to(args.device)
-    elif model_name in ['ResNet50', 'DenseNet121', 'MobileNetV2', 'ShuffleNetV2', 'EfficientNetB0']:
-        model = models.get_model(model_name, args).to(args.device)
+    elif model_name in ['ResNet18', 'AlexNet', 'VGG11', 'DenseNet121', 'ConvNet_Base'] and args.dataset in ['CIFAR10', 'CIFAR100']:
+        model = models.get_model_cifar(model_name, args).to(args.device)
+    elif model_name in ['ResNet50', 'DenseNet121', 'MobileNetV2', 'ShuffleNetV2', 'EfficientNetB0'] and args.dataset == 'ImageNet':
+        model = get_model_imagenet(model_name, args).to(args.device)
+    elif model_name in ['MobileNetV2', 'VGG11', 'DenseNet121', 'EfficientNetB0', 'ConvNet_Base'] and args.dataset == 'GTSRB':
+        model = get_model_gtsrb(model_name, args).to(args.device)
 
     return model
 
@@ -521,6 +626,9 @@ def client_model_name(args):
     elif args.dataset in ['ImageNet']:
         model_name = {0: 'ResNet50', 1: 'DenseNet121', 2: 'MobileNetV2', 3: 'ShuffleNetV2', 4: 'EfficientNetB0', 5: 'ResNet50',
                       6: 'DenseNet121', 7: 'MobileNetV2', 8: 'ShuffleNetV2', 9: 'EfficientNetB0'}
+    elif args.dataset in ['GTSRB']:
+        model_name = {0: 'MobileNetV2', 1: 'VGG11', 2: 'DenseNet121', 3: 'EfficientNetB0', 4: 'ConvNet_Base', 5: 'MobileNetV2', 6: 'VGG11', 7: 'DenseNet121', 8: 'EfficientNetB0',
+                      9: 'ConvNet_Base'}
     return model_name
 
 # 输出实验信息

@@ -30,7 +30,7 @@ def FL(args):
     # 1 下载数据集, 非独立同分布设置
     train_dataset, test_dataset, client_datasets = utils.Download_data(args.dataset, 'dataset', args)
     distill_dataset, new_test_dataset = utils.split_testset_by_class(test_dataset)
-
+    args.num_classes = len(train_dataset.classes)
     # 寻找公共的像素图像
     # global_model = models.get_model(args).to(args.device)
     # mask, pattern = utils.create_pixel_trigger_final(distill_dataset, top_percentage=99.0)

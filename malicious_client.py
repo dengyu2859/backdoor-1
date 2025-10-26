@@ -28,7 +28,7 @@ class Malicious_client():
             self.K = torch.randn(self.S, self.S)
         elif args.dataset in ['CIFAR10', 'CIFAR100']:
             self.K = torch.randn(3, self.S, self.S)
-        elif args.dataset in ['ImageNet']:
+        elif args.dataset in ['ImageNet', 'GTSRB']:
             self.K = torch.randn(3, self.S, self.S)
         self.BETA = args.beta  # 污染比例
         self.local_poisoned_indices, self.alpha = self.get_poisoned_indices()
@@ -38,7 +38,7 @@ class Malicious_client():
         # image, label = self.poisoned_trainset[65]
         # self.Show_img(image, label)
         # self.train_loader = DataLoader(self.poisoned_trainset, batch_size=self.args.local_bs, shuffle=False)
-        self.train_loader = DataLoader(self.normal_dataset, batch_size=self.args.local_bs, shuffle=False)
+        self.train_loader = DataLoader(self.normal_dataset, batch_size=self.args.local_bs, shuffle=False, drop_last=True)
 
     def return_params(self):
         return self.S, self.K, self.alpha

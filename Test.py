@@ -191,7 +191,7 @@ def compute_g(images, K, S, args):
         g = (bottom_right.squeeze(1) * K).sum(dim=(1, 2))  # (B,)
     elif args.dataset in ['CIFAR10', 'CIFAR100']:
         g = (bottom_right * K).sum(dim=(1, 2, 3))  # (B,) sum over C, S, S
-    elif args.dataset in ['ImageNet']:
+    elif args.dataset in ['ImageNet', 'GTSRB']:
         g = (bottom_right * K).sum(dim=(1, 2, 3))
     return g
 

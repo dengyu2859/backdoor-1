@@ -17,7 +17,7 @@ class Client():
         self.id = _id
         self.args = args
         self.loss_func = loss_func
-        self.train_loader = DataLoader(self.normal_dataset, batch_size=self.args.local_bs, shuffle=True)
+        self.train_loader = DataLoader(self.normal_dataset, batch_size=self.args.local_bs, shuffle=True, drop_last=True)
         self.n_data = len(self.normal_dataset)
         self.model = utils.model_choice(model_type, args)
         # # 根据传入的 model_type 参数选择模型
